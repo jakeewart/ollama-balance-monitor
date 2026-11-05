@@ -66,7 +66,7 @@ You need to set `OLLAMA_API_KEY` as an environment variable. The easiest way on 
 Double-click:
 
 ```text
-obb-update-api-key.bat
+update-api-key.bat
 ```
 
 This opens a small popup asking for your Ollama Cloud API key.
@@ -88,6 +88,8 @@ Restart your terminal or log out and back in for the change to take effect.
 
 ### Linux / macOS
 
+**Currently untested, plans to build out Linux specific version**
+
 ```bash
 export OLLAMA_API_KEY="your-api-key-here"
 ```
@@ -99,7 +101,7 @@ Add that line to your `~/.bashrc` or `~/.zshrc` to make it persistent.
 On Windows, run:
 
 ```bash
-obb-build.bat
+build.bat
 ```
 
 This script will:
@@ -121,7 +123,7 @@ Run that file to start the monitor in the background with no console window.
 
 - `assets/ollama.ico` is used for both the application icon and the tray icon
 - The API key is set as a user environment variable during the build
-- You can update your key later by running `obb-update-api-key.bat`
+- You can update your key later by running `update-api-key.bat`
 
 ## Launch on boot (Windows)
 
@@ -132,8 +134,8 @@ Right-click the tray icon and select **Launch on boot** to add or remove the app
 ```text
 ollama-balance-monitor/
 ├── README.md
-├── obb-build.bat
-├── obb-update-api-key.bat
+├── build.bat
+├── update-api-key.bat
 ├── assets/
 │   └── ollama.ico
 └── src/
@@ -141,7 +143,12 @@ ollama-balance-monitor/
     ├── requirements.txt
     └── set-api-key.ps1
 ```
+## ToDo
+- **_Initial build is AI-assisted, optimisation required_**
+- Add plan options dropdown with built in selection to match plan to title on hover.
+- Full Linux port and build - Arch will be completed first, with universal Linux support to follow.
+- Develop icon options further with improve UI.
+- Pop-up UI improvements.
 
 ## License
-
 MIT
