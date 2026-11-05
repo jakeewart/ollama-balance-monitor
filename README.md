@@ -23,7 +23,8 @@ Ollama API documentation: https://docs.ollama.com/api/introduction
 ## Requirements
 
 - Python 3.10+
-- Windows, Linux, or macOS
+- Windows
+- Linux and macOS currently untested (require manual install)
 - `OLLAMA_API_KEY` environment variable
 
 ## Installation
@@ -35,13 +36,43 @@ git clone https://github.com/jakeewart/ollama-balance-monitor.git
 cd ollama-balance-monitor
 ```
 
+### Building a standalone Windows executable
+
+On Windows, run:
+
+```bash
+build.bat
+```
+
+This script will:
+
+1. Check that Python is installed
+2. Prompt for your Ollama Cloud API key (if not already set)
+3. Install Python dependencies from `src/requirements.txt`
+4. Build a single `.exe` file using PyInstaller
+
+The output is:
+
+```text
+dist/ollama-balance-monitor.exe
+```
+
+Run that file to start the monitor in the background with no console window.
+
+### Notes on the build
+
+- `assets/ollama.ico` is used for both the application icon and the tray icon
+- The API key is set as a user environment variable during the build
+- You can update your key later by running `update-api-key.bat`
+
+
+### Manual Install
+
 Install dependencies:
 
 ```bash
 pip install -r src/requirements.txt
 ```
-
-## Usage
 
 Run directly from source:
 
@@ -59,7 +90,7 @@ The tray icon refreshes every 10 seconds by default. Right-click the icon to ref
 
 ## Setting your API key
 
-You need to set `OLLAMA_API_KEY` as an environment variable. The easiest way on Windows is to run the provided helper script.
+You need to set `OLLAMA_API_KEY` as an environment variable. The easiest way on Windows is to run the provided helper script or entering during build.bat.
 
 ### Windows
 
@@ -95,35 +126,6 @@ export OLLAMA_API_KEY="your-api-key-here"
 ```
 
 Add that line to your `~/.bashrc` or `~/.zshrc` to make it persistent.
-
-## Building a standalone Windows executable
-
-On Windows, run:
-
-```bash
-build.bat
-```
-
-This script will:
-
-1. Check that Python is installed
-2. Prompt for your Ollama Cloud API key (if not already set)
-3. Install Python dependencies from `src/requirements.txt`
-4. Build a single `.exe` file using PyInstaller
-
-The output is:
-
-```text
-dist/ollama-balance-monitor.exe
-```
-
-Run that file to start the monitor in the background with no console window.
-
-### Notes on the build
-
-- `assets/ollama.ico` is used for both the application icon and the tray icon
-- The API key is set as a user environment variable during the build
-- You can update your key later by running `update-api-key.bat`
 
 ## Launch on boot (Windows)
 
