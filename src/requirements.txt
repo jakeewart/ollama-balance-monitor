@@ -2,3 +2,4 @@ pyinstaller
 pystray
 pillow
 requests
+PyGObject; sys_platform == 'linux'

@@ -23,8 +23,8 @@ Ollama API documentation: https://docs.ollama.com/api/introduction
 ## Requirements
 
 - Python 3.10+
-- Windows
-- Linux and macOS currently untested (require manual install)
+- Windows or Linux (Arch + Hyprland/Wayland tested; other distros/desktop environments should work with the same dependencies)
+- macOS currently untested
 - `OLLAMA_API_KEY` environment variable
 
 ## Installation
@@ -65,8 +65,41 @@ Run that file to start the monitor in the background with no console window.
 - The API key is set as a user environment variable during the build
 - You can update your key later by running `update-api-key.bat`
 
+### Linux
 
-### Manual Install
+The app has been tested on **Arch Linux with Hyprland/Wayland**. It should work on any Wayland or X11 desktop with a system tray that supports the SNI/AppIndicator protocol (e.g., Waybar, KDE, GNOME).
+
+1. Install system dependencies:
+
+   ```bash
+   sudo pacman -S gobject-introspection gtk3 libappindicator-gtk3
+   ```
+
+   On Debian/Ubuntu-based distros the equivalent packages are roughly (untested):
+
+   ```bash
+   sudo apt install libgirepository1.0-dev libcairo2-dev python3-gi python3-gi-cairo libappindicator3-1 gir1.2-appindicator3-0.1
+   ```
+
+2. Create a virtual environment and install Python packages:
+
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate
+   pip install -r src/requirements.txt
+   ```
+
+3. Run:
+
+   ```bash
+   export OLLAMA_API_KEY="your-api-key-here"
+   python src/main.py
+   ```
+
+   For Waybar/Hyprland, make sure the tray module is enabled in `~/.config/waybar/config`.
+   Then restart Waybar.
+
+### Manual Install (all platforms)
 
 Install dependencies:
 
@@ -78,12 +111,6 @@ Run directly from source:
 
 ```bash
 python src/main.py
-```
-
-On Windows, you can also use `pythonw` to avoid a console window:
-
-```bash
-pythonw src/main.py
 ```
 
 The tray icon refreshes every 10 seconds by default. Right-click the icon to refresh manually, toggle launch on boot, or quit.
@@ -119,17 +146,95 @@ Restart your terminal or log out and back in for the change to take effect.
 
 ### Linux / macOS
 
-**Currently untested, plans to build out Linux specific version**
+On Linux, set the key in your current shell:
 
 ```bash
 export OLLAMA_API_KEY="your-api-key-here"
 ```
 
-Add that line to your `~/.bashrc` or `~/.zshrc` to make it persistent.
+To make it persistent, add the same line to `~/.bashrc`, `~/.zshrc`, or use a systemd service (see [Launch on boot](#launch-on-boot-linux) below).
 
-## Launch on boot (Windows)
+On macOS, add it to `~/.zshrc` or `~/.bash_profile`:
+
+```bash
+export OLLAMA_API_KEY="your-api-key-here"
+```
+
+Then reload your shell or open a new terminal.
+
+## Launch on boot
+
+### Windows
 
 Right-click the tray icon and select **Launch on boot** to add or remove the app from your startup registry. The app will start automatically the next time you log in.
+
+### Linux {#launch-on-boot-linux}
+
+Create a systemd user service. Adjust the paths and API key to match your setup.
+
+`~/.config/systemd/user/ollama-balance.service`:
+
+```ini
+[Unit]
+Description=Ollama Balance Monitor
+
+[Service]
+Type=simple
+Environment=OLLAMA_API_KEY=your-api-key-here
+WorkingDirectory=%h/source/ollama-balance-monitor
+ExecStart=%h/source/ollama-balance-monitor/.venv/bin/python %h/source/ollama-balance-monitor/src/main.py
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+Enable and start it:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now ollama-balance.service
+```
+
+To view logs:
+
+```bash
+journalctl --user -u ollama-balance.service -f
+```
+
+#### Storing the API key in a separate env file
+
+If you prefer not to keep your API key in the unit file, you can put it in an environment file with restricted permissions instead.
+
+`~/.config/ollama-balance/env`:
+
+```bash
+OLLAMA_API_KEY=your-api-key-here
+```
+
+Lock down the file so only your user can read it:
+
+```bash
+chmod 600 ~/.config/ollama-balance/env
+```
+
+Then change the service to load it with `EnvironmentFile`:
+
+```ini
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/ollama-balance/env
+WorkingDirectory=%h/source/ollama-balance-monitor
+ExecStart=%h/source/ollama-balance-monitor/.venv/bin/python %h/source/ollama-balance-monitor/src/main.py
+Restart=on-failure
+```
+
+Then reload and restart:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user restart ollama-balance.service
+```
 
 ## Project structure
 
@@ -145,12 +250,15 @@ ollama-balance-monitor/
     ├── requirements.txt
     └── set-api-key.ps1
 ```
+
 ## ToDo
+
 - **_Initial build is AI-assisted, optimisation required_**
-- Add plan options dropdown with built in selection to match plan to title on hover.
-- Full Linux port and build - Arch will be completed first, with universal Linux support to follow.
-- Develop icon options further with improve UI.
+- Add plan options dropdown with built-in selection to match plan to title on hover.
+- ~~Full Linux port and build - Arch will be completed first, with universal Linux support to follow.~~ Linux support added (Arch/Hyprland/Wayland tested; other distros pending feedback).
+- Develop icon options further with improved UI.
 - Pop-up UI improvements.
 
 ## License
+
 MIT

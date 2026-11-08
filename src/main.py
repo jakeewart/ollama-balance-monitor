@@ -12,6 +12,11 @@ from datetime import datetime, timezone
 
 import requests
 from PIL import Image
+
+if platform.system() == "Linux":
+    import gi
+    gi.require_version("AppIndicator3", "0.1")
+
 import pystray
 
 API_URL = "https://ollama.com/api/balance"
@@ -260,7 +265,7 @@ def main() -> None:
     icon = pystray.Icon(
         "ollama-balance",
         logo,
-        "Ollama balance: loading\u2026",
+        "Ollama balance: loading...",
         menu=build_menu(logo),
     )
     threading.Thread(target=poll_loop, args=(icon, logo), daemon=True).start()
