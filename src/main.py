@@ -18,7 +18,8 @@ API_URL = "https://ollama.com/api/balance"
 USAGE_API_URL = "https://ollama.com/api/usage"
 DEFAULT_USAGE_RANGE = "24h"
 USAGE_RANGES = ["24h", "7d", "30d"]
-POLL_SECONDS = 10
+POLL_RATES = [15, 30, 45, 60]
+DEFAULT_POLL_RATE = 15
 ICON_SIZE = 32
 TIMEOUT = 15
 GREEN_TINT = (76, 175, 80)
@@ -30,8 +31,20 @@ polling_state = {"enabled": True}
 figures_state = {"enabled": True}
 percentages_state = {"enabled": False}
 progress_bar_state = {"enabled": False}
-advanced_view_state = {"enabled": False}
 usage_range_state = {"value": "24h"}
+poll_rate_state = {"value": DEFAULT_POLL_RATE}
+latest_state = {
+    "allowance": 0.0,
+    "used": 0.0,
+    "remaining_included": 0.0,
+    "remaining_purchased": 0.0,
+    "daily": 0.0,
+    "expected": 0.0,
+    "over": False,
+    "from_dt": None,
+    "until_dt": None,
+    "usage": None,
+}
 APP_NAME = "ollama-balance-monitor"
 REGISTRY_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
@@ -142,6 +155,7 @@ def is_polling_enabled(item: pystray.MenuItem) -> bool:
 
 def toggle_figures(icon: pystray.Icon, _item: pystray.MenuItem) -> None:
     figures_state["enabled"] = not figures_state["enabled"]
+    update_tooltip(icon)
     safe_update_menu(icon)
 
 
@@ -155,6 +169,7 @@ def are_figures_enabled(item: pystray.MenuItem) -> bool:
 
 def toggle_percentages(icon: pystray.Icon, _item: pystray.MenuItem) -> None:
     percentages_state["enabled"] = not percentages_state["enabled"]
+    update_tooltip(icon)
     safe_update_menu(icon)
 
 
@@ -168,6 +183,7 @@ def are_percentages_enabled(item: pystray.MenuItem) -> bool:
 
 def toggle_progress_bar(icon: pystray.Icon, _item: pystray.MenuItem) -> None:
     progress_bar_state["enabled"] = not progress_bar_state["enabled"]
+    update_tooltip(icon)
     safe_update_menu(icon)
 
 
@@ -179,14 +195,8 @@ def is_progress_bar_enabled(item: pystray.MenuItem) -> bool:
     return progress_bar_state["enabled"]
 
 
-def toggle_advanced_view(icon: pystray.Icon, _item: pystray.MenuItem, logo: Image.Image) -> None:
-    advanced_view_state["enabled"] = not advanced_view_state["enabled"]
-    icon.menu = build_menu(logo)
-    safe_update_menu(icon)
-
-
-def view_switch_menu_label(item: pystray.MenuItem) -> str:
-    return "Switch to Simple View" if advanced_view_state["enabled"] else "Switch to Advanced View"
+def details_menu_item(logo: Image.Image) -> pystray.MenuItem:
+    return build_details_menu(logo)
 
 
 def next_usage_range() -> str:
@@ -199,13 +209,33 @@ def next_usage_range() -> str:
     return USAGE_RANGES[(idx + 1) % len(USAGE_RANGES)]
 
 
-def toggle_usage_range(icon: pystray.Icon, _item: pystray.MenuItem) -> None:
+def toggle_usage_range(icon: pystray.Icon, _item: pystray.MenuItem, logo: Image.Image) -> None:
     usage_range_state["value"] = next_usage_range()
-    safe_update_menu(icon)
+    threading.Thread(target=refresh, args=(icon, logo), daemon=True).start()
 
 
 def usage_range_menu_label(item: pystray.MenuItem) -> str:
     return f"Usage range: {usage_range_state['value']}"
+
+
+def next_poll_rate() -> int:
+    """Cycle to the next polling rate value."""
+    current = poll_rate_state["value"]
+    try:
+        idx = POLL_RATES.index(current)
+    except ValueError:
+        idx = -1
+    return POLL_RATES[(idx + 1) % len(POLL_RATES)]
+
+
+def toggle_poll_rate(icon: pystray.Icon, _item: pystray.MenuItem, logo: Image.Image) -> None:
+    poll_rate_state["value"] = next_poll_rate()
+    icon.menu = build_menu(logo)
+    safe_update_menu(icon)
+
+
+def poll_rate_menu_label(item: pystray.MenuItem) -> str:
+    return f"Poll rate: {poll_rate_state['value']}s"
 
 
 def fetch_balance() -> dict:
@@ -270,14 +300,13 @@ def plan_name(allowance: float) -> str:
 def ascii_progress_bar(used: float, total: float, width: int = 27) -> str:
     if width < 2:
         return ""
-    bar_chars = width - 2
     if total <= 0:
         filled = 0
     else:
         ratio = min(max(used / total, 0.0), 1.0)
-        filled = int(round(bar_chars * ratio))
-    empty = bar_chars - filled
-    return "[" + "#" * filled + "-" * empty + "]"
+        filled = int(round(width * ratio))
+    empty = width - filled
+    return "█" * filled + "░" * empty
 
 
 def fmt(value: float) -> str:
@@ -290,7 +319,7 @@ def pct(value: float, total: float) -> str:
     return f"{(value / total * 100.0):.2f}%"
 
 
-def build_advanced_view(allowance: float, used: float, remaining_included: float, remaining_purchased: float, total_budget: float, daily: float, expected: float, over: bool, from_dt: datetime, until_dt: datetime, usage: dict | None) -> list[str]:
+def build_details_content(allowance: float, used: float, remaining_included: float, remaining_purchased: float, daily: float, expected: float, over: bool, from_dt: datetime, until_dt: datetime, usage: dict | None) -> tuple[list[str], list[str]]:
     total_days = max(1, (until_dt - from_dt).days + 1)
     now = datetime.now(timezone.utc)
     if now < from_dt:
@@ -304,18 +333,17 @@ def build_advanced_view(allowance: float, used: float, remaining_included: float
         ("Plan", plan_name(allowance)),
         ("Included", fmt(allowance)),
         ("Purchased", fmt(remaining_purchased)),
-        ("Used", f"{fmt(used)} ({pct(used, total_budget)})"),
-        ("Remaining", f"{fmt(remaining_included)} ({pct(remaining_included, total_budget)})"),
+        ("Used", f"{fmt(used)} ({pct(used, allowance)})"),
+        ("Remaining", f"{fmt(remaining_included)} ({pct(remaining_included, allowance)})"),
         ("Daily rate", f"{fmt(daily)}/day"),
-        ("Expected spend", fmt(expected)),
+        ("On rate spend", fmt(expected)),
         ("Status", "Over rate" if over else "On rate"),
         ("Period", f"{from_dt.strftime('%Y-%m-%d')} → {until_dt.strftime('%Y-%m-%d')}"),
         ("Day", f"{day_index} / {total_days}"),
     ]
 
     width = max(len(label) for label, _ in rows)
-    lines = [f"{label:<{width}}  {value}" for label, value in rows]
-    lines.append(ascii_progress_bar(used, total_budget))
+    budget_lines = [f"{label:<{width}}  {value}" for label, value in rows]
 
     if usage:
         totals = usage.get("totals") or {}
@@ -329,35 +357,92 @@ def build_advanced_view(allowance: float, used: float, remaining_included: float
             ("Cached tokens", f"{int(totals.get('cached_input_tokens') or 0):,}"),
             ("Output tokens", f"{int(totals.get('output_tokens') or 0):,}"),
         ]
-        lines.append("")
         usage_width = max(len(label) for label, _ in usage_rows)
-        lines.extend([f"{label:<{usage_width}}  {value}" for label, value in usage_rows])
-
-    return lines
-
-def build_tooltip(allowance: float, used: float, remaining_included: float, remaining_purchased: float, total_budget: float, daily: float, expected: float, over: bool, from_dt: datetime, until_dt: datetime, usage: dict | None = None) -> str:
-    lines: list[str] = []
-
-    if advanced_view_state["enabled"]:
-        lines.extend(build_advanced_view(allowance, used, remaining_included, remaining_purchased, total_budget, daily, expected, over, from_dt, until_dt, usage))
+        usage_lines = [f"{label:<{usage_width}}  {value}" for label, value in usage_rows]
     else:
-        status = "Over rate" if over else "On rate"
-        plan = plan_name(allowance)
-        used_pct = (used / total_budget * 100.0) if total_budget > 0 else 0.0
-        remaining_pct = (remaining_included / total_budget * 100.0) if total_budget > 0 else 0.0
-        lines.append(f"{plan} @ ${daily:.2f}/day  ·  {status}")
-        if figures_state["enabled"]:
-            if remaining_purchased > 0:
-                lines.append(f"${used:.2f} used  ·  ${remaining_included:.2f} (+${remaining_purchased:.2f}) left")
-            else:
-                lines.append(f"${used:.2f} used  ·  ${remaining_included:.2f} left")
-        if percentages_state["enabled"]:
-            lines.append(f"{used_pct:.2f}% used  ·  {remaining_pct:.2f}% left")
+        usage_lines = []
 
-    if progress_bar_state["enabled"] and not advanced_view_state["enabled"]:
-        lines.append(ascii_progress_bar(used, total_budget))
+    return budget_lines, usage_lines
+
+
+def build_details_menu(logo: Image.Image) -> pystray.MenuItem:
+    s = latest_state
+
+    submenu_items: list[pystray.MenuItem | None] = [
+        pystray.MenuItem(usage_range_menu_label, lambda icon, item: toggle_usage_range(icon, item, logo)),
+        pystray.Menu.SEPARATOR,
+    ]
+
+    if s["from_dt"] is None or s["until_dt"] is None:
+        submenu_items.append(pystray.MenuItem("Loading...", None, enabled=False))
+    else:
+        budget_lines, usage_lines = build_details_content(
+            s["allowance"],
+            s["used"],
+            s["remaining_included"],
+            s["remaining_purchased"],
+            s["daily"],
+            s["expected"],
+            s["over"],
+            s["from_dt"],
+            s["until_dt"],
+            s["usage"],
+        )
+
+        submenu_items.append(pystray.MenuItem("-- Budget --", None, enabled=False))
+        for line in budget_lines:
+            submenu_items.append(pystray.MenuItem(line, None, enabled=False))
+
+        if usage_lines:
+            submenu_items.append(pystray.Menu.SEPARATOR)
+            submenu_items.append(pystray.MenuItem("-- Usage --", None, enabled=False))
+            for line in usage_lines:
+                submenu_items.append(pystray.MenuItem(line, None, enabled=False))
+
+    return pystray.MenuItem("Details >", pystray.Menu(*[item for item in submenu_items if item is not None]))
+
+
+def build_tooltip_menu(logo: Image.Image) -> pystray.MenuItem:
+    submenu = pystray.Menu(
+        pystray.MenuItem(figures_menu_label, toggle_figures, checked=are_figures_enabled),
+        pystray.MenuItem(percentages_menu_label, toggle_percentages, checked=are_percentages_enabled),
+        pystray.MenuItem(progress_bar_menu_label, toggle_progress_bar, checked=is_progress_bar_enabled),
+    )
+    return pystray.MenuItem("Tooltip >", submenu)
+
+
+def build_tooltip(allowance: float, used: float, remaining_included: float, remaining_purchased: float, daily: float, expected: float, over: bool) -> str:
+    status = "Over rate" if over else "On rate"
+    plan = plan_name(allowance)
+    used_pct = (used / allowance * 100.0) if allowance > 0 else 0.0
+    remaining_pct = (remaining_included / allowance * 100.0) if allowance > 0 else 0.0
+
+    lines: list[str] = [f"{plan} @ ${daily:.2f}/day  ·  {status}"]
+    if figures_state["enabled"]:
+        if remaining_purchased > 0:
+            lines.append(f"${used:.2f} used  ·  ${remaining_included:.2f} (+${remaining_purchased:.2f}) left")
+        else:
+            lines.append(f"${used:.2f} used  ·  ${remaining_included:.2f} left")
+    if percentages_state["enabled"]:
+        lines.append(f"{used_pct:.2f}% used  ·  {remaining_pct:.2f}% left")
+    if progress_bar_state["enabled"]:
+        lines.append(ascii_progress_bar(used, allowance))
 
     return "\n".join(lines)
+
+
+def update_tooltip(icon: pystray.Icon) -> None:
+    s = latest_state
+    icon.title = build_tooltip(
+        s["allowance"],
+        s["used"],
+        s["remaining_included"],
+        s["remaining_purchased"],
+        s["daily"],
+        s["expected"],
+        s["over"],
+    )
+    state["text"] = icon.title
 
 
 def refresh(icon: pystray.Icon, logo: Image.Image) -> None:
@@ -368,23 +453,31 @@ def refresh(icon: pystray.Icon, logo: Image.Image) -> None:
         allowance = float(included.get("allowance_usd") or 0.0)
         remaining_included = float(included.get("balance_usd") or 0.0)
         remaining_purchased = float(purchased.get("balance_usd") or 0.0)
-        total_budget = allowance
         used = max(0.0, allowance - remaining_included)
         from_dt, until_dt = parse_period(balance)
         daily, expected, over = budget_status(allowance, used, from_dt, until_dt)
 
-        if advanced_view_state["enabled"]:
-            try:
-                usage = fetch_usage(usage_range_state["value"])
-            except Exception as usage_exc:
-                usage = None
-                print(f"[ollama-balance] usage fetch failed: {usage_exc}", file=sys.stderr)
-        else:
+        try:
+            usage = fetch_usage(usage_range_state["value"])
+        except Exception as usage_exc:
             usage = None
+            print(f"[ollama-balance] usage fetch failed: {usage_exc}", file=sys.stderr)
+
+        latest_state.update({
+            "allowance": allowance,
+            "used": used,
+            "remaining_included": remaining_included,
+            "remaining_purchased": remaining_purchased,
+            "daily": daily,
+            "expected": expected,
+            "over": over,
+            "from_dt": from_dt,
+            "until_dt": until_dt,
+            "usage": usage,
+        })
 
         icon.icon = tint_image(logo, RED_TINT if over else GREEN_TINT)
-        icon.title = build_tooltip(allowance, used, remaining_included, remaining_purchased, total_budget, daily, expected, over, from_dt, until_dt, usage)
-        state["text"] = icon.title
+        update_tooltip(icon)
     except Exception as exc:
         icon.icon = tint_image(logo, RED_TINT)
         icon.title = "Ollama balance: unavailable"
@@ -395,12 +488,17 @@ def refresh(icon: pystray.Icon, logo: Image.Image) -> None:
     except Exception as exc:
         print(f"[ollama-balance] menu update failed: {exc}", file=sys.stderr)
 
+    try:
+        icon.menu = build_menu(logo)
+    except Exception as exc:
+        print(f"[ollama-balance] menu rebuild failed: {exc}", file=sys.stderr)
+
 
 def poll_loop(icon: pystray.Icon, logo: Image.Image) -> None:
     while True:
         if polling_state["enabled"]:
             refresh(icon, logo)
-        time.sleep(POLL_SECONDS)
+        time.sleep(poll_rate_state["value"])
 
 
 def manual_refresh(icon: pystray.Icon, logo: Image.Image, _item=None) -> None:
@@ -416,33 +514,31 @@ def startup_menu_item() -> pystray.MenuItem | None:
     return pystray.MenuItem("Launch on boot", toggle_startup, checked=checked)
 
 
+def build_polling_menu(logo: Image.Image) -> pystray.MenuItem:
+    submenu = pystray.Menu(
+        pystray.MenuItem(polling_menu_label, lambda icon, item: toggle_polling(icon, logo, item), checked=is_polling_enabled),
+        pystray.MenuItem(poll_rate_menu_label, lambda icon, item: toggle_poll_rate(icon, item, logo)),
+    )
+    return pystray.MenuItem("Polling >", submenu)
+
+
 def build_menu(logo: Image.Image) -> pystray.Menu:
     items: list[pystray.MenuItem | None] = [
         pystray.MenuItem(lambda _item: state["text"], None, enabled=False),
         pystray.Menu.SEPARATOR,
-        startup_menu_item(),
-        pystray.MenuItem(polling_menu_label, lambda icon, item: toggle_polling(icon, logo, item), checked=is_polling_enabled),
-        pystray.MenuItem(view_switch_menu_label, lambda icon, item: toggle_advanced_view(icon, item, logo)),
+        build_tooltip_menu(logo),
+        details_menu_item(logo),
+        pystray.Menu.SEPARATOR,
+        build_polling_menu(logo),
+        pystray.MenuItem("Refresh now", lambda icon, item: manual_refresh(icon, logo, item)),
+        pystray.Menu.SEPARATOR,
     ]
 
-    if not advanced_view_state["enabled"]:
-        items.extend([
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(figures_menu_label, toggle_figures, checked=are_figures_enabled),
-            pystray.MenuItem(percentages_menu_label, toggle_percentages, checked=are_percentages_enabled),
-            pystray.MenuItem(progress_bar_menu_label, toggle_progress_bar, checked=is_progress_bar_enabled),
-        ])
-    else:
-        items.extend([
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(usage_range_menu_label, toggle_usage_range),
-        ])
+    startup = startup_menu_item()
+    if startup is not None:
+        items.append(startup)
 
-    items.extend([
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Refresh now", lambda icon, item: manual_refresh(icon, logo, item)),
-        pystray.MenuItem("Quit", lambda icon, _item: icon.stop()),
-    ])
+    items.append(pystray.MenuItem("Quit", lambda icon, _item: icon.stop()))
 
     return pystray.Menu(*[item for item in items if item is not None])
 
